@@ -1,8 +1,7 @@
-const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const http = require('http');
+const fetch = require('node-fetch');
 
-const app = express();
-
+// تنظیمات پروکسی
 const TARGET_BASE = process.env.TARGET_DOMAIN || "";
 const PORT = process.env.PORT || 3000;
 
@@ -11,21 +10,32 @@ if (!TARGET_BASE) {
   process.exit(1);
 }
 
-// استفاده از http-proxy-middleware برای پروکسی درخواست‌ها
-app.use('/', createProxyMiddleware({
-  target: TARGET_BASE,
-  changeOrigin: true,
-  secure: false,
-  pathRewrite: {
-    '^/': '/', // تغییر مسیر URL در صورت نیاز
-  },
-  headers: {
-    'x-forwarded-for': '127.0.0.1',
-    'x-real-ip': '127.0.0.1',
-  }
-}));
+// ایجاد سرور HTTP
+const server = http.createServer(async (req, res) => {
+  try {
+    const targetUrl = new URL(TARGET_BASE + req.url);
 
-// پورت از محیط $PORT دریافت می‌شود
-app.listen(PORT, () => {
+    // هدرهای درخواست
+    const outHeaders = new Headers(req.headers);
+    outHeaders.set('x-forwarded-for', req.connection.remoteAddress);
+
+    // ارسال درخواست به سرور مقصد با استفاده از fetch
+    const fetchRes = await fetch(targetUrl, {
+      method: req.method,
+      headers: outHeaders,
+      body: req.method === 'GET' || req.method === 'HEAD' ? null : req,
+    });
+
+    res.writeHead(fetchRes.status, fetchRes.headers);
+    fetchRes.body.pipe(res);
+  } catch (err) {
+    console.error("Relay error:", err);
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+    res.end("Bad Gateway: Tunnel Failed");
+  }
+});
+
+// سرور را راه‌اندازی می‌کنیم
+server.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
