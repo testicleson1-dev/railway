@@ -1,20 +1,14 @@
 const http = require('http');
-const httpProxy = require('http-proxy');
 
-// تنظیم پروکسی
-const proxy = httpProxy.createProxyServer({});
-
-// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
-const PORT = process.env.PORT || 3000;
-
-// هدرهایی که باید فیلتر شوند
+// تنظیمات پروکسی
 const STRIP_HEADERS = new Set([
-  "host", "connection", "keep-alive", "proxy-authenticate",
-  "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade",
-  "forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port"
+  "host", "connection", "keep-alive", "proxy-authenticate", 
+  "proxy-authorization", "te", "trailer", "transfer-encoding", 
+  "upgrade", "forwarded", "x-forwarded-host", "x-forwarded-proto", 
+  "x-forwarded-port"
 ]);
 
-// تنظیمات مقصد (Target Domain) از متغیر محیطی TARGET_DOMAIN
+// دریافت TARGET_DOMAIN از متغیر محیطی
 const TARGET_BASE = (process.env.TARGET_DOMAIN || "").replace(/\/$/, "");
 
 if (!TARGET_BASE) {
@@ -23,8 +17,9 @@ if (!TARGET_BASE) {
 }
 
 // ایجاد سرور HTTP
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
+    // مسیر مقصد پروکسی
     const pathStart = req.url.indexOf("/", 8);
     const targetUrl =
       pathStart === -1 ? TARGET_BASE + "/" : TARGET_BASE + req.url.slice(pathStart);
@@ -32,7 +27,6 @@ const server = http.createServer((req, res) => {
     // هدرهای درخواست
     const out = new Map();
     let clientIp = null;
-
     for (const [k, v] of Object.entries(req.headers)) {
       if (STRIP_HEADERS.has(k)) continue;
       if (k.startsWith("x-vercel-")) continue;
@@ -48,26 +42,30 @@ const server = http.createServer((req, res) => {
     }
     if (clientIp) out.set("x-forwarded-for", clientIp);
 
-    // متد درخواست و چک کردن اینکه آیا بدنه باید ارسال شود
+    // متد درخواست و بررسی بدنه آن
     const method = req.method;
     const hasBody = method !== "GET" && method !== "HEAD";
 
-    // درخواست به سرور هدف
-    proxy.web(req, res, {
-      target: targetUrl,
+    // ارسال درخواست به سرور مقصد
+    const fetchOptions = {
       method,
-      headers: Object.fromEntries(out), // تبدیل Map به object
-      body: hasBody ? req.body : undefined,
-      duplex: "half",
-      redirect: "manual",
-    });
+      headers: Object.fromEntries(out),
+      body: hasBody ? req : undefined, // ارسال بدنه درخواست
+    };
+
+    const fetchRes = await fetch(targetUrl, fetchOptions);
+
+    res.writeHead(fetchRes.status, fetchRes.headers);
+    fetchRes.body.pipe(res);
   } catch (err) {
-    console.error("relay error:", err);
+    console.error("Relay error:", err);
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     res.end("Bad Gateway: Tunnel Failed");
   }
 });
 
+// پورت را از محیط می‌خوانیم
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
