@@ -2,15 +2,12 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-// پورت سرور Railway (برای استفاده در تولید) 
+// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
 const PORT = process.env.PORT || 3000;
-
-// دامنه مقصد از متغیر محیطی
-const TARGET_DOMAIN = process.env.TARGET_DOMAIN || "https://sinaw.com"; // سرور خارجی شما
-const TARGET_PATH = "/admin"; // مسیر اضافی که می‌خواهید اضافه کنید (در صورت نیاز)
+const TARGET_BASE = process.env.TARGET_DOMAIN || "";
 
 // اطمینان از تنظیم صحیح TARGET_DOMAIN
-if (!TARGET_DOMAIN) {
+if (!TARGET_BASE) {
   console.error("Misconfigured: TARGET_DOMAIN is not set");
   process.exit(1);
 }
@@ -18,17 +15,16 @@ if (!TARGET_DOMAIN) {
 // ایجاد سرور پروکسی
 const server = http.createServer((req, res) => {
   try {
-    // ساخت URL کامل مقصد
-    const targetUrl = new URL(TARGET_DOMAIN + TARGET_PATH + req.url);
+    const targetUrl = new URL(TARGET_BASE + req.url); // ساخت URL مقصد
 
-    // هدرهای درخواست
-    const outHeaders = {
-      ...req.headers,
-      'x-forwarded-for': req.connection.remoteAddress, // اضافه کردن IP کاربر به هدر
-      'x-real-ip': req.connection.remoteAddress, // هدر `x-real-ip`
-    };
+    // هدرهایی که باید ارسال شوند
+    const outHeaders = { ...req.headers };
+    outHeaders['x-forwarded-for'] = req.connection.remoteAddress; // اضافه کردن IP کاربر به هدر
+    outHeaders['x-real-ip'] = req.connection.remoteAddress;
 
-    // ارسال درخواست به سرور مقصد (سرور خارجی)
+    console.log(`Proxying request to: ${targetUrl.href}`); // لاگ درخواست پروکسی شده
+
+    // ارسال درخواست به سرور مقصد
     const proxyRequest = https.request(targetUrl, {
       method: req.method,
       headers: outHeaders,
