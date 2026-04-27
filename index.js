@@ -1,10 +1,7 @@
 const http = require('http');
-const httpProxy = require('http-proxy');
+const fetch = require('node-fetch');
 
-// پروکسی سرور را ایجاد می‌کنیم
-const proxy = httpProxy.createProxyServer({});
-
-// پورت را از محیط می‌خوانیم (Railway به طور خودکار این را تنظیم می‌کند)
+// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
 const PORT = process.env.PORT || 3000;
 
 // تنظیمات مقصد (TARGET_DOMAIN) از متغیر محیطی
@@ -16,16 +13,15 @@ if (!TARGET_BASE) {
 }
 
 // ایجاد سرور HTTP
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
-    // مسیر مقصد پروکسی
     const pathStart = req.url.indexOf("/", 8);
     const targetUrl =
       pathStart === -1 ? TARGET_BASE + "/" : TARGET_BASE + req.url.slice(pathStart);
 
-    const out = new Map();
+    // هدرهای درخواست
+    const out = new Headers();
     let clientIp = null;
-
     for (const [k, v] of Object.entries(req.headers)) {
       if (k === 'host' || k.startsWith('x-vercel-')) continue;
       if (k === 'x-real-ip') {
@@ -38,16 +34,17 @@ const server = http.createServer((req, res) => {
       }
       out.set(k, v);
     }
-
     if (clientIp) out.set('x-forwarded-for', clientIp);
 
-    // ارسال درخواست به سرور مقصد
-    proxy.web(req, res, {
-      target: targetUrl,
-      headers: Object.fromEntries(out),
-      changeOrigin: true, // برای تغییر اوریجین درخواست
-      secure: false, // از امنیت TLS در پروکسی استفاده می‌کنیم
+    // ارسال درخواست به سرور مقصد با استفاده از fetch
+    const fetchRes = await fetch(targetUrl, {
+      method: req.method,
+      headers: out,
+      body: req.method === 'GET' || req.method === 'HEAD' ? null : req,
     });
+
+    res.writeHead(fetchRes.status, fetchRes.headers);
+    fetchRes.body.pipe(res);
   } catch (err) {
     console.error('Relay error:', err);
     res.writeHead(502, { 'Content-Type': 'text/plain' });
