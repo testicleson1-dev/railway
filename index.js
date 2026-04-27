@@ -1,7 +1,13 @@
-export const config = { runtime: "edge" };
+const http = require('http');
+const httpProxy = require('http-proxy');
 
-const TARGET_BASE = (process.env.TARGET_DOMAIN || "").replace(/\/$/, "");
+// تنظیم پروکسی
+const proxy = httpProxy.createProxyServer({});
 
+// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
+const PORT = process.env.PORT || 3000;
+
+// هدرهایی که باید فیلتر شوند
 const STRIP_HEADERS = new Set([
   "host",
   "connection",
@@ -18,11 +24,16 @@ const STRIP_HEADERS = new Set([
   "x-forwarded-port",
 ]);
 
-export default async function handler(req) {
-  if (!TARGET_BASE) {
-    return new Response("Misconfigured: TARGET_DOMAIN is not set", { status: 500 });
-  }
+// تنظیمات مقصد (Target Domain) از متغیر محیطی TARGET_DOMAIN
+const TARGET_BASE = (process.env.TARGET_DOMAIN || "").replace(/\/$/, "");
 
+if (!TARGET_BASE) {
+  console.error('Misconfigured: TARGET_DOMAIN is not set');
+  process.exit(1);
+}
+
+// ایجاد سرور HTTP
+const server = http.createServer((req, res) => {
   try {
     const pathStart = req.url.indexOf("/", 8);
     const targetUrl =
@@ -48,7 +59,9 @@ export default async function handler(req) {
     const method = req.method;
     const hasBody = method !== "GET" && method !== "HEAD";
 
-    return await fetch(targetUrl, {
+    // درخواست به سرور هدف
+    proxy.web(req, res, {
+      target: targetUrl,
       method,
       headers: out,
       body: hasBody ? req.body : undefined,
@@ -57,6 +70,11 @@ export default async function handler(req) {
     });
   } catch (err) {
     console.error("relay error:", err);
-    return new Response("Bad Gateway: Tunnel Failed", { status: 502 });
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+    res.end("Bad Gateway: Tunnel Failed");
   }
-}
+});
+
+server.listen(PORT, () => {
+  console.log(`Proxy server running on port ${PORT}`);
+});
