@@ -1,8 +1,9 @@
 const http = require('http');
-const https = require('https');
-const { URL } = require('url');
+const httpProxy = require('http-proxy');
 
-// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
+// ایجاد پروکسی سرور
+const proxy = httpProxy.createProxyServer({});
+
 const PORT = process.env.PORT || 3000;
 const TARGET_BASE = process.env.TARGET_DOMAIN || "";
 
@@ -11,44 +12,30 @@ if (!TARGET_BASE) {
   process.exit(1);
 }
 
-// ایجاد سرور پروکسی
+// ایجاد سرور HTTP
 const server = http.createServer((req, res) => {
   try {
-    // مسیر مقصد
-    const targetUrl = new URL(TARGET_BASE + req.url);
+    const targetUrl = TARGET_BASE + req.url;
 
     // هدرهایی که باید ارسال شوند
-    const outHeaders = {
-      ...req.headers,
-      'x-forwarded-for': req.connection.remoteAddress,
-    };
+    const outHeaders = { ...req.headers };
+    outHeaders['x-forwarded-for'] = req.connection.remoteAddress;
 
-    // هدرهای خاص `xhttp` را اضافه می‌کنیم
-    outHeaders['x-real-ip'] = req.connection.remoteAddress;
-
-    // درخواست پروکسی به سرور مقصد
-    const proxyRequest = https.request(targetUrl, {
-      method: req.method,
+    // ارسال درخواست به سرور مقصد
+    proxy.web(req, res, {
+      target: targetUrl,
       headers: outHeaders,
-    }, (proxyResponse) => {
-      res.writeHead(proxyResponse.statusCode, proxyResponse.headers);
-      proxyResponse.pipe(res, { end: true });
+      changeOrigin: true,
+      secure: false,
     });
-
-    // ارسال بدنه درخواست در صورت نیاز
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      req.pipe(proxyRequest, { end: true });
-    } else {
-      proxyRequest.end();
-    }
   } catch (err) {
-    console.error("Error in proxy:", err);
+    console.error("Relay error:", err);
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     res.end("Bad Gateway: Tunnel Failed");
   }
 });
 
-// راه‌اندازی سرور
+// سرور را راه‌اندازی می‌کنیم
 server.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
