@@ -1,10 +1,10 @@
-const https = require('https');
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 
-// تنظیمات پروکسی و متغیرهای محیطی
-const TARGET_BASE = process.env.TARGET_DOMAIN || "";
+// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
 const PORT = process.env.PORT || 3000;
+const TARGET_BASE = process.env.TARGET_DOMAIN || "";
 
 if (!TARGET_BASE) {
   console.error("Misconfigured: TARGET_DOMAIN is not set");
@@ -14,7 +14,7 @@ if (!TARGET_BASE) {
 // ایجاد سرور پروکسی
 const server = http.createServer((req, res) => {
   try {
-    // ساخت URL مقصد با استفاده از مسیرهای درخواست
+    // مسیر مقصد
     const targetUrl = new URL(TARGET_BASE + req.url);
 
     // هدرهایی که باید ارسال شوند
@@ -23,19 +23,15 @@ const server = http.createServer((req, res) => {
       'x-forwarded-for': req.connection.remoteAddress,
     };
 
-    // حذف هدرهایی که نباید ارسال شوند
-    delete outHeaders['host'];  // حذف هدر host
-    delete outHeaders['connection'];  // حذف connection
-    delete outHeaders['accept-encoding'];  // حذف accept-encoding
+    // هدرهای خاص `xhttp` را اضافه می‌کنیم
+    outHeaders['x-real-ip'] = req.connection.remoteAddress;
 
-    // انجام درخواست پروکسی
+    // درخواست پروکسی به سرور مقصد
     const proxyRequest = https.request(targetUrl, {
       method: req.method,
       headers: outHeaders,
     }, (proxyResponse) => {
       res.writeHead(proxyResponse.statusCode, proxyResponse.headers);
-
-      // ارسال بدنه پاسخ به کاربر
       proxyResponse.pipe(res, { end: true });
     });
 
@@ -52,7 +48,7 @@ const server = http.createServer((req, res) => {
   }
 });
 
-// شروع سرور
+// راه‌اندازی سرور
 server.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
