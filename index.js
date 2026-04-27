@@ -1,41 +1,58 @@
 const http = require('http');
-const fetch = require('node-fetch');
+const https = require('https');
+const { URL } = require('url');
 
-// تنظیمات پروکسی
-const TARGET_BASE = process.env.TARGET_DOMAIN || "";
+// پورت سرور Railway (برای استفاده در تولید) 
 const PORT = process.env.PORT || 3000;
 
-if (!TARGET_BASE) {
+// دامنه مقصد از متغیر محیطی
+const TARGET_DOMAIN = process.env.TARGET_DOMAIN || "https://sinaw.com"; // سرور خارجی شما
+const TARGET_PATH = "/admin"; // مسیر اضافی که می‌خواهید اضافه کنید (در صورت نیاز)
+
+// اطمینان از تنظیم صحیح TARGET_DOMAIN
+if (!TARGET_DOMAIN) {
   console.error("Misconfigured: TARGET_DOMAIN is not set");
   process.exit(1);
 }
 
-// ایجاد سرور HTTP
-const server = http.createServer(async (req, res) => {
+// ایجاد سرور پروکسی
+const server = http.createServer((req, res) => {
   try {
-    const targetUrl = new URL(TARGET_BASE + req.url);
+    // ساخت URL کامل مقصد
+    const targetUrl = new URL(TARGET_DOMAIN + TARGET_PATH + req.url);
 
     // هدرهای درخواست
-    const outHeaders = new Headers(req.headers);
-    outHeaders.set('x-forwarded-for', req.connection.remoteAddress);
+    const outHeaders = {
+      ...req.headers,
+      'x-forwarded-for': req.connection.remoteAddress, // اضافه کردن IP کاربر به هدر
+      'x-real-ip': req.connection.remoteAddress, // هدر `x-real-ip`
+    };
 
-    // ارسال درخواست به سرور مقصد با استفاده از fetch
-    const fetchRes = await fetch(targetUrl, {
+    // ارسال درخواست به سرور مقصد (سرور خارجی)
+    const proxyRequest = https.request(targetUrl, {
       method: req.method,
       headers: outHeaders,
-      body: req.method === 'GET' || req.method === 'HEAD' ? null : req,
+    }, (proxyResponse) => {
+      // ارسال وضعیت و هدرها به کلاینت
+      res.writeHead(proxyResponse.statusCode, proxyResponse.headers);
+      // ارسال بدنه پاسخ به کاربر
+      proxyResponse.pipe(res, { end: true });
     });
 
-    res.writeHead(fetchRes.status, fetchRes.headers);
-    fetchRes.body.pipe(res);
+    // ارسال بدنه درخواست در صورت نیاز
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      req.pipe(proxyRequest, { end: true });
+    } else {
+      proxyRequest.end();
+    }
   } catch (err) {
-    console.error("Relay error:", err);
+    console.error("Error in proxy:", err);
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     res.end("Bad Gateway: Tunnel Failed");
   }
 });
 
-// سرور را راه‌اندازی می‌کنیم
+// راه‌اندازی سرور
 server.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
