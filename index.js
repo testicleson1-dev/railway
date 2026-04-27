@@ -1,62 +1,44 @@
-export const config = { runtime: "edge" };
+const http = require('http');
+const httpProxy = require('http-proxy');
 
+// تنظیمات پروکسی
+const proxy = httpProxy.createProxyServer({});
+
+// پورت از محیط $PORT دریافت می‌شود (Railway این را به طور خودکار تنظیم می‌کند)
+const PORT = process.env.PORT || 3000;
+
+// تنظیمات مقصد (TARGET_DOMAIN) از متغیر محیطی
 const TARGET_BASE = (process.env.TARGET_DOMAIN || "").replace(/\/$/, "");
 
-const STRIP_HEADERS = new Set([
-  "host",
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "forwarded",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-forwarded-port",
-]);
+if (!TARGET_BASE) {
+  console.error('Misconfigured: TARGET_DOMAIN is not set');
+  process.exit(1);
+}
 
-export default async function handler(req) {
-  if (!TARGET_BASE) {
-    return new Response("Misconfigured: TARGET_DOMAIN is not set", { status: 500 });
-  }
-
+// ایجاد سرور HTTP
+const server = http.createServer((req, res) => {
   try {
     const pathStart = req.url.indexOf("/", 8);
     const targetUrl =
       pathStart === -1 ? TARGET_BASE + "/" : TARGET_BASE + req.url.slice(pathStart);
 
-    const out = new Headers();
-    let clientIp = null;
-    for (const [k, v] of req.headers) {
-      if (STRIP_HEADERS.has(k)) continue;
-      if (k.startsWith("x-vercel-")) continue;
-      if (k === "x-real-ip") {
-        clientIp = v;
-        continue;
-      }
-      if (k === "x-forwarded-for") {
-        if (!clientIp) clientIp = v;
-        continue;
-      }
-      out.set(k, v);
-    }
-    if (clientIp) out.set("x-forwarded-for", clientIp);
+    const outHeaders = { ...req.headers };
+    outHeaders['x-forwarded-for'] = req.connection.remoteAddress;
 
-    const method = req.method;
-    const hasBody = method !== "GET" && method !== "HEAD";
-
-    return await fetch(targetUrl, {
-      method,
-      headers: out,
-      body: hasBody ? req.body : undefined,
-      duplex: "half",
-      redirect: "manual",
+    proxy.web(req, res, {
+      target: targetUrl,
+      headers: outHeaders,
+      changeOrigin: true,
+      secure: false, // از امنیت TLS در پروکسی استفاده می‌کنیم
     });
   } catch (err) {
-    console.error("relay error:", err);
-    return new Response("Bad Gateway: Tunnel Failed", { status: 502 });
+    console.error('Relay error:', err);
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+    res.end("Bad Gateway: Tunnel Failed");
   }
-}
+});
+
+// سرور را راه‌اندازی می‌کنیم
+server.listen(PORT, () => {
+  console.log(`Proxy server running on port ${PORT}`);
+});
