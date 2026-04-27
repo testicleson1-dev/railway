@@ -9,19 +9,9 @@ const PORT = process.env.PORT || 3000;
 
 // هدرهایی که باید فیلتر شوند
 const STRIP_HEADERS = new Set([
-  "host",
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "forwarded",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-forwarded-port",
+  "host", "connection", "keep-alive", "proxy-authenticate",
+  "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade",
+  "forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port"
 ]);
 
 // تنظیمات مقصد (Target Domain) از متغیر محیطی TARGET_DOMAIN
@@ -39,9 +29,11 @@ const server = http.createServer((req, res) => {
     const targetUrl =
       pathStart === -1 ? TARGET_BASE + "/" : TARGET_BASE + req.url.slice(pathStart);
 
-    const out = new Headers();
+    // هدرهای درخواست
+    const out = new Map();
     let clientIp = null;
-    for (const [k, v] of req.headers) {
+
+    for (const [k, v] of Object.entries(req.headers)) {
       if (STRIP_HEADERS.has(k)) continue;
       if (k.startsWith("x-vercel-")) continue;
       if (k === "x-real-ip") {
@@ -56,6 +48,7 @@ const server = http.createServer((req, res) => {
     }
     if (clientIp) out.set("x-forwarded-for", clientIp);
 
+    // متد درخواست و چک کردن اینکه آیا بدنه باید ارسال شود
     const method = req.method;
     const hasBody = method !== "GET" && method !== "HEAD";
 
@@ -63,7 +56,7 @@ const server = http.createServer((req, res) => {
     proxy.web(req, res, {
       target: targetUrl,
       method,
-      headers: out,
+      headers: Object.fromEntries(out), // تبدیل Map به object
       body: hasBody ? req.body : undefined,
       duplex: "half",
       redirect: "manual",
